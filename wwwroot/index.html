@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+<html lang="uk" data-bs-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta
+    http-equiv="Content-Security-Policy"
+    content="default-src 'self' http://tauri.localhost https://tauri.localhost; connect-src 'self' ipc: http://ipc.localhost https://ipc.localhost http://tauri.localhost https://tauri.localhost; img-src 'self' asset: http://asset.localhost https://asset.localhost file: data: blob: https://cdn.cloudflare.steamstatic.com https://cdn.akamai.steamstatic.com https://api.opendota.com; style-src 'self'; script-src 'self';"
+  />
+  <title>Dota 2 Counter Overlay</title>
+  <link rel="stylesheet" href="vendor/bootstrap/bootstrap.min.css" />
+  <link rel="stylesheet" href="vendor/bootstrap-icons/bootstrap-icons.min.css" />
+  <link rel="stylesheet" href="css/overlay.css" />
+</head>
+<body>
+  <div id="overlay-shell" class="overlay-shell">
+    <header class="overlay-header">
+      <div class="d-flex align-items-center gap-1 min-w-0">
+        <i class="bi bi-shield-shaded text-danger flex-shrink-0"></i>
+        <span class="overlay-title" title="Dota 2 Counter Overlay">D2</span>
+        <span
+          id="patch-badge"
+          class="badge text-bg-secondary patch-badge no-drag flex-shrink-0"
+          title="Клікніть, щоб перевірити оновлення патчу"
+        >—</span>
+        <button
+          id="btn-update-db"
+          type="button"
+          class="btn btn-header-quiet btn-header-compact fw-semibold no-drag flex-shrink-0"
+          title="Завантажити свіжі дані OpenDota API (patch, heroes, items, abilities) та переаналізувати базу правил без перезапуску"
+        >
+          <i class="bi bi-arrow-repeat"></i> <span id="lbl-update-db">Оновити базу</span>
+        </button>
+      </div>
+
+      <div class="d-flex align-items-center header-right-actions no-drag flex-shrink-0">
+        <div id="lang-switcher" class="lang-switcher" role="group" aria-label="Language">
+          <button type="button" class="lang-btn is-active" data-lang="uk" title="Українська мова">UA</button>
+          <button type="button" class="lang-btn" data-lang="ru" title="Русский язык">RU</button>
+          <button type="button" class="lang-btn" data-lang="en" title="English language">EN</button>
+        </div>
+        <button
+          id="btn-click-through"
+          type="button"
+          class="btn btn-header-quiet btn-header-compact"
+          title="Клік крізь вікно (Alt+X)"
+        >
+          <i class="bi bi-mouse2"></i><span class="ms-1">Alt+X</span>
+        </button>
+        <button
+          id="btn-mini-mode"
+          type="button"
+          class="btn btn-header-quiet btn-header-icon"
+          title="Компактний міні-режим HUD (380×110)"
+        >
+          <i id="btn-mini-mode-icon" class="bi bi-arrows-collapse"></i>
+        </button>
+        <button
+          id="btn-gsi-cfg"
+          type="button"
+          class="btn btn-header-quiet btn-header-compact"
+          title="Налаштування вікна, GSI та .cfg файл"
+        >
+          CFG
+        </button>
+        <button
+          id="btn-reset"
+          type="button"
+          class="btn btn-header-quiet is-warn btn-header-compact"
+          title="Нова гра / Скинути все"
+          disabled
+        >
+          <i class="bi bi-arrow-counterclockwise"></i>
+        </button>
+        <button
+          id="btn-hide"
+          type="button"
+          class="btn btn-header-quiet btn-header-icon"
+          title="Сховати в трей (Alt+Q)"
+        >
+          <i class="bi bi-dash"></i>
+        </button>
+        <button
+          id="btn-close"
+          type="button"
+          class="btn btn-header-quiet is-danger btn-header-icon"
+          title="Закрити додаток"
+        >
+          <i class="bi bi-x"></i>
+        </button>
+      </div>
+    </header>
+
+    <div id="click-through-banner" class="click-through-banner d-none">
+      <i class="bi bi-lock-fill me-1"></i><span id="lbl-click-through-banner">Кліки проходять крізь вікно (35%) — Alt+X або трей для розблокування</span>
+    </div>
+
+    <section id="mini-hud-strip" class="mini-hud-strip d-none no-drag">
+      <div class="mini-hud-meta">
+        <span id="mini-phase-label" class="mini-phase-badge">Авто</span>
+        <span id="mini-hud-hint" class="mini-hud-hint text-truncate">Топ-5 предметів</span>
+      </div>
+      <div id="mini-items-row" class="mini-items-row"></div>
+    </section>
+
+    <section class="tools-strip no-drag">
+      <div class="tools-row">
+        <button
+          id="btn-scan-draft"
+          type="button"
+          class="btn btn-tool-primary btn-tool-xs"
+          title="Розпізнати 10 героїв із верхньої панелі екрана"
+        >
+          <i class="bi bi-bounding-box me-1"></i><span id="lbl-scan-draft">Скан драфту (Alt+S)</span>
+        </button>
+        <button
+          id="btn-scan-enemy-items"
+          type="button"
+          class="btn btn-tool-quiet btn-tool-xs"
+          title="Розпізнати інвентар виділеного ворога внизу HUD"
+        >
+          <i class="bi bi-eye me-1"></i><span id="lbl-scan-enemy-items">Закуп (Alt+E)</span>
+        </button>
+        <button
+          id="btn-hud-calibration"
+          type="button"
+          class="btn btn-tool-quiet btn-tool-xs flex-no-grow"
+          title="Калібрування рамок HUD і вибір екрана піку/матчу"
+        >
+          <i class="bi bi-sliders"></i> HUD
+        </button>
+      </div>
+      <div id="dev-tools-row" class="tools-row d-none">
+        <button
+          id="btn-test-gsi"
+          type="button"
+          class="btn btn-tool-quiet is-dev-info btn-tool-xs"
+          title="Імітувати GSI-пакет (Juggernaut + куплений BKB)"
+        >
+          Тест GSI
+        </button>
+        <button
+          id="btn-test-autodraft"
+          type="button"
+          class="btn btn-tool-quiet is-dev-success btn-tool-xs"
+          title="Імітувати розпізнавання 4 союзників і 5 ворогів"
+        >
+          Тест авто-драфту
+        </button>
+        <button
+          id="btn-test-enemy-items"
+          type="button"
+          class="btn btn-tool-quiet is-dev-warn btn-tool-xs"
+          title="Імітувати виявлення Butterfly у ворожої PA"
+        >
+          Тест ворожого закупа
+        </button>
+      </div>
+    </section>
+
+    <section id="gsi-cfg-drawer" class="gsi-cfg-drawer d-none no-drag">
+      <div class="d-flex align-items-center justify-content-between mb-1">
+        <span class="fw-semibold text-info d-flex align-items-center gap-1 flex-wrap">
+          <i class="bi bi-hdd-network"></i>GSI <span id="gsi-server-status">127.0.0.1:3000</span>
+          <span id="gsi-debug-badge" class="badge text-bg-secondary d-none">Без Dota 2</span>
+        </span>
+        <div class="d-flex gap-1">
+          <button id="btn-regen-cfg" type="button" class="btn btn-outline-info btn-header-compact">
+            Оновити .cfg
+          </button>
+          <button id="btn-close-cfg" type="button" class="btn btn-outline-secondary btn-header-icon">
+            <i class="bi bi-x"></i>
+          </button>
+        </div>
+      </div>
+      <div id="gsi-cfg-message" class="text-light-emphasis mb-1"></div>
+      <code id="gsi-cfg-path" class="gsi-path-code mb-1"></code>
+      <div id="gsi-cfg-target-hint" class="text-secondary mb-2"></div>
+      <div class="d-flex align-items-center justify-content-between gap-2 pt-1 border-top border-secondary-subtle">
+        <label for="range-opacity" class="small text-secondary text-nowrap mb-0">
+          <span id="lbl-opacity">Прозорість</span> (<span id="opacity-value-label">96%</span>)
+        </label>
+        <input id="range-opacity" type="range" class="form-range flex-grow-1" min="45" max="100" step="1" value="96" />
+        <button id="btn-reset-pos" type="button" class="btn btn-outline-secondary btn-header-compact">
+          Скинути позицію
+        </button>
+      </div>
+      <div class="d-flex align-items-center justify-content-between gap-2 pt-2 mt-1 border-top border-secondary-subtle">
+        <button id="btn-reanalyze-rules" type="button" class="btn btn-outline-warning btn-header-compact flex-grow-1">
+          <i class="bi bi-cpu me-1"></i><span id="lbl-reanalyze-rules">Переаналізувати скіли та предмети</span>
+        </button>
+      </div>
+      <div id="reanalyze-report-text" class="text-success-emphasis small mt-1 d-none"></div>
+    </section>
+
+    <section id="hud-calibration-drawer" class="hud-calibration-drawer d-none no-drag">
+      <div class="d-flex align-items-center justify-content-between mb-1">
+        <span class="fw-semibold text-primary-emphasis">
+          <i class="bi bi-aspect-ratio me-1"></i><span id="lbl-cal-title">Калібрування HUD</span> (<span id="cal-profile-label">Авто</span>)
+        </span>
+        <div class="d-flex gap-1">
+          <button id="btn-cal-preview" type="button" class="btn btn-outline-primary btn-header-compact">Превʼю</button>
+          <button id="btn-cal-reset" type="button" class="btn btn-outline-secondary btn-header-compact">Скинути</button>
+          <button id="btn-cal-close" type="button" class="btn btn-outline-secondary btn-header-icon">
+            <i class="bi bi-x"></i>
+          </button>
+        </div>
+      </div>
+
+      <div class="d-flex align-items-center gap-1 mb-1">
+        <span id="lbl-cal-screen" class="text-secondary">Екран:</span>
+        <button type="button" class="phase-btn cal-mode-btn is-active" data-cal-mode="auto">Авто</button>
+        <button type="button" class="phase-btn cal-mode-btn" data-cal-mode="ingame">У матчі</button>
+        <button type="button" class="phase-btn cal-mode-btn" data-cal-mode="draft">Екран піку</button>
+      </div>
+
+      <div class="row g-1 align-items-center mb-1">
+        <div class="col-4 d-flex align-items-center gap-1">
+          <span class="text-secondary">X:</span>
+          <input id="input-cal-x" type="number" class="form-control form-control-sm hero-search-input py-0 px-1" min="-80" max="80" value="0" />
+        </div>
+        <div class="col-4 d-flex align-items-center gap-1">
+          <span class="text-secondary">Y:</span>
+          <input id="input-cal-y" type="number" class="form-control form-control-sm hero-search-input py-0 px-1" min="-80" max="80" value="0" />
+        </div>
+        <div class="col-4 d-flex align-items-center gap-1">
+          <span class="text-secondary">M:</span>
+          <input id="input-cal-scale" type="number" step="0.02" class="form-control form-control-sm hero-search-input py-0 px-1" min="0.80" max="1.20" value="1.00" />
+        </div>
+      </div>
+
+      <div id="cal-preview-wrap" class="d-none">
+        <img id="calibration-preview-img" class="calibration-preview-img" alt="HUD Preview" />
+        <div class="small text-secondary mt-1" id="cal-preview-hint"></div>
+      </div>
+    </section>
+
+    <section class="my-context-panel no-drag">
+      <div class="d-flex align-items-center gap-2">
+        <span id="lbl-my-hero" class="small text-secondary fw-semibold text-nowrap">Мій герой:</span>
+
+        <div id="my-hero-selected-wrap" class="my-hero-chip flex-grow-1 d-none">
+          <img id="my-hero-img" class="my-hero-chip-img" alt="" />
+          <span id="my-hero-name" class="my-hero-chip-name text-truncate flex-grow-1"></span>
+          <span id="my-hero-gsi-badge" class="badge text-bg-info d-none">GSI</span>
+          <button
+            id="btn-clear-my-hero"
+            type="button"
+            class="btn btn-link text-secondary p-0 lh-1"
+            title="Прибрати мого героя"
+          >
+            <i class="bi bi-x-circle"></i>
+          </button>
+        </div>
+
+        <div id="my-hero-search-wrap" class="hero-search-wrap flex-grow-1">
+          <input
+            id="my-hero-input"
+            type="text"
+            class="form-control form-control-sm hero-search-input"
+            placeholder="Viper, Lifestealer, Jugg..."
+            autocomplete="off"
+            spellcheck="false"
+          />
+          <div id="my-hero-dropdown" class="autocomplete-dropdown d-none"></div>
+        </div>
+      </div>
+
+      <div class="pos-btn-group" id="position-buttons">
+        <button type="button" class="pos-btn is-active" data-pos="" title="Авто / Усі позиції">Авто</button>
+        <button type="button" class="pos-btn" data-pos="1" title="1 — Кері (Carry)">1 Кері</button>
+        <button type="button" class="pos-btn" data-pos="2" title="2 — Мід (Mid)">2 Мід</button>
+        <button type="button" class="pos-btn" data-pos="3" title="3 — Офлейн (Offlane)">3 Офлейн</button>
+        <button type="button" class="pos-btn" data-pos="4" title="4 — Сап (Soft Support)">4 Сап</button>
+        <button type="button" class="pos-btn" data-pos="5" title="5 — Фул сап (Hard Support)">5 Фул сап</button>
+      </div>
+
+      <div id="gsi-inventory-strip" class="gsi-inventory-strip d-none">
+        <i class="bi bi-check2-circle flex-shrink-0"></i>
+        <span id="gsi-inventory-text" class="text-truncate"></span>
+      </div>
+    </section>
+
+    <section class="allies-panel no-drag">
+      <button id="btn-toggle-allies" type="button" class="allies-header-btn">
+        <span class="fw-semibold">
+          <i class="bi bi-people-fill text-success me-1"></i><span id="lbl-allies">Союзники</span> (<span id="allies-count">0</span>/4)
+        </span>
+        <span class="d-flex align-items-center gap-2">
+          <span id="allies-mini-strip" class="ally-mini-strip"></span>
+          <i id="allies-chevron" class="bi bi-chevron-down"></i>
+        </span>
+      </button>
+
+      <div id="allies-collapse-body" class="d-none">
+        <div class="ally-slots-grid" id="ally-slots"></div>
+        <div class="hero-search-wrap">
+          <input
+            id="ally-search-input"
+            type="text"
+            class="form-control form-control-sm hero-search-input"
+            placeholder="Додати союзника (Underlord, CM, Lion...)"
+            autocomplete="off"
+            spellcheck="false"
+          />
+          <div id="ally-dropdown" class="autocomplete-dropdown d-none"></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="draft-panel no-drag">
+      <div class="d-flex align-items-center justify-content-between mb-1">
+        <span class="small text-secondary fw-semibold">
+          <span id="lbl-enemies">Ворожий пік</span> (<span id="selected-count">0</span>/5)
+        </span>
+        <span class="small text-secondary" id="vision-status-text"></span>
+      </div>
+
+      <div class="enemy-slots-grid" id="enemy-slots"></div>
+
+      <div class="hero-search-wrap">
+        <div class="input-group input-group-sm">
+          <span class="input-group-text bg-dark border-secondary text-secondary py-0 px-2">
+            <i class="bi bi-search"></i>
+          </span>
+          <input
+            id="hero-search-input"
+            type="text"
+            class="form-control hero-search-input"
+            placeholder="Пошук ворога (pa, am, bb, pl, Invoker...)"
+            autocomplete="off"
+            spellcheck="false"
+          />
+          <button
+            id="btn-clear-search"
+            type="button"
+            class="btn btn-outline-secondary py-0 px-2 d-none"
+            title="Очистити пошук"
+          >
+            <i class="bi bi-x-lg"></i>
+          </button>
+        </div>
+
+        <div id="autocomplete-dropdown" class="autocomplete-dropdown d-none"></div>
+      </div>
+    </section>
+
+    <section class="enemy-items-panel no-drag">
+      <div class="d-flex align-items-center justify-content-between">
+        <span class="small fw-semibold text-light-emphasis">
+          <i class="bi bi-bag-check text-info me-1"></i><span id="lbl-enemy-items">Предмети ворога</span> (<span id="spotted-items-count">0</span>)
+        </span>
+        <button
+          id="btn-add-enemy-item"
+          type="button"
+          class="btn btn-header-quiet btn-header-compact"
+          title="Вказати ворожий предмет вручну"
+        >
+          + Додати
+        </button>
+      </div>
+      <div id="spotted-items-list" class="spotted-items-list d-none"></div>
+      <div id="enemy-item-picker" class="enemy-item-picker d-none"></div>
+    </section>
+
+    <main class="recommendations-panel no-drag">
+      <div class="phase-strip">
+        <div class="phase-btn-group" id="match-phase-buttons">
+          <span id="lbl-phase" class="small text-secondary me-1">Фаза:</span>
+          <button type="button" class="phase-btn is-active" data-phase="auto">Авто</button>
+          <button type="button" class="phase-btn" data-phase="early">0–15</button>
+          <button type="button" class="phase-btn" data-phase="mid">15–30</button>
+          <button type="button" class="phase-btn" data-phase="late">30+</button>
+        </div>
+        <span id="match-clock-badge" class="small text-info fw-semibold"></span>
+      </div>
+
+      <div id="counter-picks-bar" class="counter-picks-bar d-none"></div>
+      <div id="threats-bar" class="threats-bar d-none"></div>
+      <div id="context-notice-bar" class="context-notice-bar d-none"></div>
+
+      <div id="recommendations-list" class="recommendations-scroll"></div>
+
+      <div id="neutral-items-bar" class="neutral-items-bar d-none"></div>
+    </main>
+
+    <footer class="overlay-footer">
+      <span id="cache-status-text" class="text-truncate flex-grow-1 min-w-0">Завантаження локальних даних...</span>
+      <button
+        id="gsi-footer-status"
+        type="button"
+        class="gsi-footer-pill"
+        title="Статус підключення Dota 2 GSI та конфігу"
+      >GSI —</button>
+      <span id="items-count-text" class="text-nowrap"></span>
+      <span id="app-version-text" class="app-version-pill text-nowrap d-none"></span>
+    </footer>
+  </div>
+
+  <script src="vendor/bootstrap/bootstrap.bundle.min.js"></script>
+  <script src="vendor/engine/analyzer.js"></script>
+  <script src="js/tauriBridge.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

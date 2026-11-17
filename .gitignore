@@ -1,0 +1,11 @@
+node_modules/
+dist/
+out/
+*.log
+.DS_Store
+Thumbs.db
+Data/cache/*
+!Data/cache/.gitkeep
+Data/settings.json
+gamestate_integration_overlay.cfg
+wwwroot/vendor/engine/
